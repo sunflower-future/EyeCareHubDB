@@ -1,0 +1,14 @@
+package com.example.EyeCareHubDB.dto;
+
+@data
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class CustomerCreateRequest {
+    private Long accountId;
+    private String firstName;
+    private String lastName;
+    private String gender;
+    private LocalDate dateOfBirth;
+    private String avatarUrl;
+}
