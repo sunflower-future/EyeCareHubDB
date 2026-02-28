@@ -48,6 +48,8 @@ public class CartService {
             throw new RuntimeException("Not enough stock available");
         }
 
+        BigDecimal currentPrice = calculateUnitPrice(variant);
+
         Optional<CartItem> existingItem = cart.getCartItems().stream()
                 .filter(item -> item.getProductVariant().getId().equals(request.getProductVariantId()))
                 .findFirst();
@@ -63,6 +65,8 @@ public class CartService {
                     .cart(cart)
                     .productVariant(variant)
                     .quantity(request.getQuantity())
+                    .snapshotPrice(currentPrice)
+                    .snapshotProductName(variant.getProduct().getName())
                     .build();
             cart.getCartItems().add(newItem);
         }
@@ -109,6 +113,13 @@ public class CartService {
         cartRepository.save(cart);
     }
 
+    private BigDecimal calculateUnitPrice(ProductVariant variant) {
+        BigDecimal basePrice = variant.getProduct().getSalePrice() != null
+                ? variant.getProduct().getSalePrice()
+                : variant.getProduct().getBasePrice();
+        return basePrice.add(variant.getAdditionalPrice() != null ? variant.getAdditionalPrice() : BigDecimal.ZERO);
+    }
+
     private Long getUserId() {
         Long id = com.example.EyeCareHubDB.util.SecurityUtils.getCurrentUserId();
         if (id == null) {
@@ -153,11 +164,10 @@ public class CartService {
 
     private CartItemDTO toItemDTO(CartItem item) {
         ProductVariant variant = item.getProductVariant();
-        BigDecimal basePrice = variant.getProduct().getSalePrice() != null ? variant.getProduct().getSalePrice()
-                : variant.getProduct().getBasePrice();
+        BigDecimal currentPrice = calculateUnitPrice(variant);
 
-        BigDecimal unitPrice = basePrice
-                .add(variant.getAdditionalPrice() != null ? variant.getAdditionalPrice() : BigDecimal.ZERO);
+        BigDecimal snapshot = item.getSnapshotPrice();
+        boolean priceChanged = snapshot != null && snapshot.compareTo(currentPrice) != 0;
 
         return CartItemDTO.builder()
                 .id(item.getId())
@@ -167,9 +177,13 @@ public class CartService {
                 .variantColor(variant.getColor())
                 .variantSize(variant.getSize())
                 .imageUrl(variant.getImageUrl())
-                .unitPrice(unitPrice)
+                .unitPrice(currentPrice)
+                .snapshotPrice(snapshot)
+                .priceChanged(priceChanged)
                 .quantity(item.getQuantity())
-                .subtotal(unitPrice.multiply(new BigDecimal(item.getQuantity())))
+                .subtotal(currentPrice.multiply(new BigDecimal(item.getQuantity())))
+                .inStock(variant.getStockQuantity() >= item.getQuantity())
+                .availableStock(variant.getStockQuantity())
                 .build();
     }
 }

@@ -18,4 +18,7 @@ public class CheckoutRequest {
     @NotBlank(message = "Phone number is required")
     private String phoneNumber;
     private String notes;
+    private String promotionCode;
+    private String orderType;
+    private String paymentMethod;
 }

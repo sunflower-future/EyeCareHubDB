@@ -1,5 +1,6 @@
 package com.example.EyeCareHubDB.entity;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 import jakarta.persistence.Column;
@@ -39,6 +40,12 @@ public class CartItem {
 
     @Column(nullable = false)
     private Integer quantity;
+
+    @Column(precision = 12, scale = 2)
+    private BigDecimal snapshotPrice;
+
+    @Column(length = 200, columnDefinition = "nvarchar(200)")
+    private String snapshotProductName;
 
     @Builder.Default
     @Column(nullable = false, updatable = false)

@@ -42,7 +42,7 @@ public class OrderItem {
     private Integer quantity;
 
     @Column(nullable = false, precision = 12, scale = 2)
-    private BigDecimal price; // Price per unit at the time of purchase
+    private BigDecimal price;
 
     @Builder.Default
     @Column(nullable = false, updatable = false)

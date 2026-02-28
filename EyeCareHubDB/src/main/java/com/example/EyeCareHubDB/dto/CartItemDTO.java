@@ -20,6 +20,10 @@ public class CartItemDTO {
     private String variantSize;
     private String imageUrl;
     private BigDecimal unitPrice;
+    private BigDecimal snapshotPrice;
+    private Boolean priceChanged;
     private Integer quantity;
     private BigDecimal subtotal;
+    private Boolean inStock;
+    private Integer availableStock;
 }

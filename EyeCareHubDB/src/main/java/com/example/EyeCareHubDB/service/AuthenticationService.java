@@ -32,12 +32,10 @@ public class AuthenticationService {
     private final AuthenticationManager authenticationManager;
 
     public Account register(RegisterRequest request) {
-        // Check if email already exists
         if (accountRepository.existsByEmail(request.getEmail())) {
             throw new RuntimeException("Email already registered: " + request.getEmail());
         }
 
-        // Create new account
         Account account = Account.builder()
                 .email(request.getEmail())
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
@@ -48,7 +46,6 @@ public class AuthenticationService {
 
         Account savedAccount = accountRepository.save(account);
 
-        // Create customer profile
         if (request.getFirstName() != null || request.getLastName() != null) {
             Customer customer = Customer.builder()
                     .account(savedAccount)
@@ -70,14 +67,12 @@ public class AuthenticationService {
         Account account = accountRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new RuntimeException("Email not found: " + request.getEmail()));
 
-        // Update last login time
         account.setLastLoginAt(LocalDateTime.now());
         accountRepository.save(account);
 
         String token = jwtService.generateToken(account);
         String refreshToken = jwtService.generateRefreshToken(account);
 
-        // Get customer info if exists
         Customer customer = customerRepository.findByAccountId(account.getId()).orElse(null);
 
         return AccountResponse.builder()
@@ -97,15 +92,10 @@ public class AuthenticationService {
         Account account = accountRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("Email not found: " + email));
 
-        // TODO: Generate password reset token and send email
-        // For now, just a placeholder
         String resetToken = UUID.randomUUID().toString();
-        // Store token in cache or database with expiration
     }
 
     public void resetPassword(String password) {
-        // TODO: Verify token and update password
-        // This should be called after validating the reset token from SecurityContext
     }
 
     public Account createAccountByAdmin(RegisterRequest request) {

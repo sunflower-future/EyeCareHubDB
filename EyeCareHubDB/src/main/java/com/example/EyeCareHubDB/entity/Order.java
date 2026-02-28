@@ -47,13 +47,42 @@ public class Order {
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrderItem> orderItems = new ArrayList<>();
 
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private OrderType orderType = OrderType.IN_STOCK;
+
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal totalPrice;
+
+    @Column(precision = 12, scale = 2)
+    private BigDecimal subtotalPrice;
+
+    @Builder.Default
+    @Column(precision = 12, scale = 2)
+    private BigDecimal discountAmount = BigDecimal.ZERO;
+
+    @Builder.Default
+    @Column(precision = 12, scale = 2)
+    private BigDecimal shippingFee = BigDecimal.ZERO;
+
+    @Column(length = 50)
+    private String promotionCode;
 
     @Builder.Default
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private OrderStatus status = OrderStatus.PENDING;
+
+    @Column(length = 50)
+    private String paymentMethod;
+
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private PaymentStatus paymentStatus = PaymentStatus.UNPAID;
+
+    private LocalDateTime paidAt;
 
     @Column(length = 500, columnDefinition = "nvarchar(500)")
     private String shippingAddress;
@@ -85,7 +114,15 @@ public class Order {
         updatedAt = LocalDateTime.now();
     }
 
+    public enum OrderType {
+        IN_STOCK, PREORDER, PRESCRIPTION
+    }
+
     public enum OrderStatus {
-        PENDING, CONFIRMED, SHIPPING, DELIVERED, CANCELLED
+        PENDING, CONFIRMED, PROCESSING, READY_FOR_SHIPPING, SHIPPING, DELIVERED, CANCELLED
+    }
+
+    public enum PaymentStatus {
+        UNPAID, PAID, REFUNDED
     }
 }

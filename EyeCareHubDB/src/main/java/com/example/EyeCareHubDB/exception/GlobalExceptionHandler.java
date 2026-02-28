@@ -26,7 +26,7 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.toMap(
                         fieldError -> fieldError.getField(),
                         fieldError -> fieldError.getDefaultMessage(),
-                        (msg1, msg2) -> msg1 // nếu trùng field thì lấy msg1
+                        (msg1, msg2) -> msg1
                 ));
 
         body.put("messages", errors);
@@ -44,7 +44,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body);
     }
 
-    // Các lỗi còn lại (Runtime, SQL, ...)
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Object> handleRuntime(RuntimeException ex) {
         Map<String, Object> body = new HashMap<>();

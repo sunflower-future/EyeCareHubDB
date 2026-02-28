@@ -21,10 +21,12 @@ import com.example.EyeCareHubDB.dto.OrderItemDTO;
 import com.example.EyeCareHubDB.dto.OrderStatisticsResponse;
 import com.example.EyeCareHubDB.dto.PageResponse;
 import com.example.EyeCareHubDB.entity.Account;
+import com.example.EyeCareHubDB.entity.AuditLog;
 import com.example.EyeCareHubDB.entity.Cart;
 import com.example.EyeCareHubDB.entity.CartItem;
 import com.example.EyeCareHubDB.entity.Order;
 import com.example.EyeCareHubDB.entity.OrderItem;
+import com.example.EyeCareHubDB.entity.Promotion;
 import com.example.EyeCareHubDB.entity.ProductVariant;
 import com.example.EyeCareHubDB.repository.AccountRepository;
 import com.example.EyeCareHubDB.repository.CartRepository;
@@ -41,6 +43,8 @@ public class OrderService {
     private final CartRepository cartRepository;
     private final ProductVariantRepository productVariantRepository;
     private final AccountRepository accountRepository;
+    private final PromotionService promotionService;
+    private final AuditLogService auditLogService;
 
     public OrderStatisticsResponse getOrderStatistics() {
         java.util.List<Object[]> statusCounts = orderRepository.countOrdersByStatus();
@@ -80,12 +84,17 @@ public class OrderService {
         }
 
         BigDecimal unitPrice = calculateUnitPrice(variant);
-        BigDecimal totalPrice = unitPrice.multiply(new BigDecimal(request.getQuantity()));
+        BigDecimal subtotalPrice = unitPrice.multiply(new BigDecimal(request.getQuantity()));
 
         Order order = Order.builder()
                 .orderNumber(generateOrderNumber())
                 .account(account)
-                .totalPrice(totalPrice)
+                .orderType(Order.OrderType.IN_STOCK)
+                .subtotalPrice(subtotalPrice)
+                .discountAmount(BigDecimal.ZERO)
+                .shippingFee(BigDecimal.ZERO)
+                .totalPrice(subtotalPrice)
+                .paymentStatus(Order.PaymentStatus.UNPAID)
                 .status(Order.OrderStatus.PENDING)
                 .shippingAddress(request.getShippingAddress())
                 .phoneNumber(request.getPhoneNumber())
@@ -105,6 +114,8 @@ public class OrderService {
         productVariantRepository.save(variant);
 
         Order savedOrder = orderRepository.save(order);
+        auditLogService.log("Order", savedOrder.getId(), AuditLog.AuditAction.CREATE, null,
+                savedOrder.getOrderNumber());
         return toDTO(savedOrder);
     }
 
@@ -121,22 +132,50 @@ public class OrderService {
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new RuntimeException("Account not found"));
 
-        BigDecimal totalPrice = BigDecimal.ZERO;
+        BigDecimal subtotalPrice = BigDecimal.ZERO;
         for (CartItem item : cart.getCartItems()) {
             ProductVariant variant = item.getProductVariant();
             if (variant.getStockQuantity() < item.getQuantity()) {
                 throw new RuntimeException(
                         "Not enough stock for: " + variant.getProduct().getName() + " (" + variant.getColor() + ")");
             }
-
             BigDecimal unitPrice = calculateUnitPrice(variant);
-            totalPrice = totalPrice.add(unitPrice.multiply(new BigDecimal(item.getQuantity())));
+            subtotalPrice = subtotalPrice.add(unitPrice.multiply(new BigDecimal(item.getQuantity())));
+        }
+
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        if (request.getPromotionCode() != null && !request.getPromotionCode().isBlank()) {
+            var validateResponse = promotionService.validatePromotion(
+                    com.example.EyeCareHubDB.dto.PromotionValidateRequest.builder()
+                            .code(request.getPromotionCode())
+                            .orderTotal(subtotalPrice)
+                            .build());
+
+            if (validateResponse.isValid()) {
+                discountAmount = validateResponse.getCalculatedDiscount();
+                promotionService.incrementUsage(request.getPromotionCode());
+            }
+        }
+
+        BigDecimal shippingFee = BigDecimal.ZERO;
+        BigDecimal totalPrice = subtotalPrice.subtract(discountAmount).add(shippingFee);
+
+        Order.OrderType orderType = Order.OrderType.IN_STOCK;
+        if (request.getOrderType() != null && !request.getOrderType().isBlank()) {
+            orderType = Order.OrderType.valueOf(request.getOrderType().toUpperCase());
         }
 
         Order order = Order.builder()
                 .orderNumber(generateOrderNumber())
                 .account(account)
+                .orderType(orderType)
+                .subtotalPrice(subtotalPrice)
+                .discountAmount(discountAmount)
+                .shippingFee(shippingFee)
                 .totalPrice(totalPrice)
+                .promotionCode(request.getPromotionCode())
+                .paymentMethod(request.getPaymentMethod())
+                .paymentStatus(Order.PaymentStatus.UNPAID)
                 .status(Order.OrderStatus.PENDING)
                 .shippingAddress(request.getShippingAddress())
                 .phoneNumber(request.getPhoneNumber())
@@ -165,6 +204,8 @@ public class OrderService {
         cart.getCartItems().clear();
         cartRepository.save(cart);
 
+        auditLogService.log("Order", savedOrder.getId(), AuditLog.AuditAction.CREATE, null,
+                savedOrder.getOrderNumber());
         return toDTO(savedOrder);
     }
 
@@ -202,17 +243,32 @@ public class OrderService {
         return toPageResponse(orderPage);
     }
 
-    public PageResponse<OrderDTO> getAllOrdersPaginated(String query, String status, int page, int size) {
+    public PageResponse<OrderDTO> getAllOrdersPaginated(String query, String status, String orderType,
+            String paymentStatus, int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         Order.OrderStatus orderStatus = null;
+        Order.OrderType type = null;
+        Order.PaymentStatus payment = null;
         if (status != null && !status.isEmpty()) {
             try {
                 orderStatus = Order.OrderStatus.valueOf(status.toUpperCase());
             } catch (IllegalArgumentException ignored) {
             }
         }
+        if (orderType != null && !orderType.isEmpty()) {
+            try {
+                type = Order.OrderType.valueOf(orderType.toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (paymentStatus != null && !paymentStatus.isEmpty()) {
+            try {
+                payment = Order.PaymentStatus.valueOf(paymentStatus.toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
 
-        Page<Order> orderPage = orderRepository.searchOrders(query, orderStatus, pageable);
+        Page<Order> orderPage = orderRepository.searchOrders(query, orderStatus, type, payment, pageable);
         return toPageResponse(orderPage);
     }
 
@@ -240,7 +296,9 @@ public class OrderService {
         }
 
         order.setStatus(Order.OrderStatus.CANCELLED);
-        return toDTO(orderRepository.save(order));
+        Order saved = orderRepository.save(order);
+        auditLogService.log("Order", orderId, AuditLog.AuditAction.STATUS_CHANGE, "PENDING", "CANCELLED");
+        return toDTO(saved);
     }
 
     @Transactional
@@ -248,13 +306,34 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
 
+        String oldStatus = order.getStatus().name();
         try {
             order.setStatus(Order.OrderStatus.valueOf(status.toUpperCase()));
         } catch (IllegalArgumentException e) {
             throw new RuntimeException("Invalid order status: " + status);
         }
 
-        return toDTO(orderRepository.save(order));
+        Order saved = orderRepository.save(order);
+        auditLogService.log("Order", orderId, AuditLog.AuditAction.STATUS_CHANGE, oldStatus, status.toUpperCase());
+        return toDTO(saved);
+    }
+
+    @Transactional
+    public OrderDTO confirmPayment(Long orderId, String paymentMethod) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        order.setPaymentStatus(Order.PaymentStatus.PAID);
+        order.setPaymentMethod(paymentMethod);
+        order.setPaidAt(LocalDateTime.now());
+
+        if (order.getStatus() == Order.OrderStatus.PENDING) {
+            order.setStatus(Order.OrderStatus.CONFIRMED);
+        }
+
+        Order saved = orderRepository.save(order);
+        auditLogService.log("Order", orderId, AuditLog.AuditAction.UPDATE, "UNPAID", "PAID");
+        return toDTO(saved);
     }
 
     private BigDecimal calculateUnitPrice(ProductVariant variant) {
@@ -271,17 +350,38 @@ public class OrderService {
     }
 
     private OrderDTO toDTO(Order order) {
+        String customerName = null;
+        if (order.getAccount().getCustomer() != null) {
+            customerName = order.getAccount().getCustomer().getFirstName() + " "
+                    + order.getAccount().getCustomer().getLastName();
+        }
+
+        List<OrderItemDTO> items = order.getOrderItems().stream().map(this::toItemDTO).collect(Collectors.toList());
+
         return OrderDTO.builder()
                 .id(order.getId())
                 .accountId(order.getAccount().getId())
+                .accountEmail(order.getAccount().getEmail())
+                .customerName(customerName)
                 .orderNumber(order.getOrderNumber())
+                .orderType(order.getOrderType() != null ? order.getOrderType().name() : null)
                 .status(order.getStatus().name())
+                .subtotalPrice(order.getSubtotalPrice())
+                .discountAmount(order.getDiscountAmount())
+                .shippingFee(order.getShippingFee())
                 .totalPrice(order.getTotalPrice())
+                .promotionCode(order.getPromotionCode())
+                .paymentMethod(order.getPaymentMethod())
+                .paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : null)
+                .paidAt(order.getPaidAt() != null ? order.getPaidAt().toString() : null)
                 .shippingAddress(order.getShippingAddress())
                 .phoneNumber(order.getPhoneNumber())
                 .notes(order.getNotes())
-                .createdAt(order.getCreatedAt().toString())
-                .items(order.getOrderItems().stream().map(this::toItemDTO).collect(Collectors.toList()))
+                .createdAt(order.getCreatedAt() != null ? order.getCreatedAt().toString() : null)
+                .updatedAt(order.getUpdatedAt() != null ? order.getUpdatedAt().toString() : null)
+                .items(items)
+                .totalItemCount(items.size())
+                .totalQuantity(items.stream().mapToInt(OrderItemDTO::getQuantity).sum())
                 .build();
     }
 
@@ -291,9 +391,11 @@ public class OrderService {
                 .id(item.getId())
                 .productVariantId(variant.getId())
                 .productName(variant.getProduct().getName())
+                .productSlug(variant.getProduct().getSlug())
                 .variantSku(variant.getSku())
                 .variantColor(variant.getColor())
                 .variantSize(variant.getSize())
+                .imageUrl(variant.getImageUrl())
                 .quantity(item.getQuantity())
                 .price(item.getPrice())
                 .subtotal(item.getPrice().multiply(new BigDecimal(item.getQuantity())))
